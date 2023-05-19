@@ -10,11 +10,25 @@ import (
 	"github.com/aiviaio/go-binance/v2"
 )
 
+type Client struct {
+	bClient  *binance.Client
+	wg       *sync.WaitGroup
+	resultCh chan map[string]string
+}
+
 func main() {
 	ctx := context.Background()
-	bClient := binance.NewClient("", "")
 
-	resp, err := bClient.NewExchangeInfoService().Do(ctx)
+	c := &Client{bClient: binance.NewClient("", ""), wg: &sync.WaitGroup{}, resultCh: make(chan map[string]string, 5)}
+
+	symbols := c.getSymbols(ctx)
+	c.fillSymbolPriceChan(ctx, symbols)
+	c.closeChan()
+	c.displayResult()
+}
+
+func (c *Client) getSymbols(ctx context.Context) []string {
+	resp, err := c.bClient.NewExchangeInfoService().Do(ctx)
 	if err != nil {
 		os.Exit(1)
 	}
@@ -25,37 +39,43 @@ func main() {
 		symbols[i] = resp.Symbols[i].Symbol
 	}
 
-	wg := &sync.WaitGroup{}
-	resultCh := make(chan map[string]string, 5)
+	return symbols
+}
 
+func (c *Client) fillSymbolPriceChan(
+	ctx context.Context,
+	symbols []string) {
 	for _, s := range symbols {
-		wg.Add(1)
+		c.wg.Add(1)
 
 		s := s
 
 		go func() {
-			defer wg.Done()
+			defer c.wg.Done()
 
-			resp, err := bClient.NewListPricesService().Symbol(s).Do(ctx)
+			resp, err := c.bClient.NewListPricesService().Symbol(s).Do(ctx)
 			if err != nil || len(resp) == 0 {
 				return
 			}
 
 			select {
-			case resultCh <- map[string]string{resp[0].Symbol: resp[0].Price}:
-				return
+			case c.resultCh <- map[string]string{resp[0].Symbol: resp[0].Price}:
 			case <-ctx.Done():
 				return
 			}
 		}()
 	}
+}
 
+func (c *Client) closeChan() {
 	go func() {
-		wg.Wait()
-		close(resultCh)
+		c.wg.Wait()
+		close(c.resultCh)
 	}()
+}
 
-	for m := range resultCh {
+func (c *Client) displayResult() {
+	for m := range c.resultCh {
 		for k, v := range m {
 			fmt.Printf("%s:%s\n", k, v)
 		}
