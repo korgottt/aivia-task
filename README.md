@@ -1,0 +1,1 @@
+At night, after 12 hours when i did the task, i accidentally realized where '/fapi/v1/ticker/price' is. It's in `binance.NewFuturesClient`, not in `binance.NewClient`. So in best case scenario i had to extend `Client` struct with additional property of type `futures.Client` and use it `fillSymbolPriceChan` method. 
